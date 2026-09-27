@@ -19,9 +19,9 @@ git-guard is two small, dependency-free hooks that make this class of mistake lo
 ## Install
 
 ```sh
-git clone https://github.com/swswswqwqw/git-guard.git
+git clone https://github.com/swswswqwqw/git-guard.git ~/git-guard
 cd your-project
-sh ../git-guard/install.sh
+sh ~/git-guard/install.sh
 ```
 
 ### Declare your scope (optional but recommended)
@@ -50,7 +50,7 @@ Add to `.claude/settings.json`:
     "PreToolUse": [
       {
         "matcher": "Bash",
-        "hooks": [{ "type": "command", "command": "node /path/to/git-guard/hooks/claude-pretooluse.mjs" }]
+        "hooks": [{ "type": "command", "command": "node ~/git-guard/hooks/claude-pretooluse.mjs" }]
       }
     ]
   }
