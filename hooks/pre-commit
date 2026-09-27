@@ -1,0 +1,67 @@
+#!/bin/sh
+# git-guard pre-commit: stop one session's commit from swallowing another session's changes.
+#
+# Scope file: .git-guard-scope at the repo root, one path prefix per line (# comments ok).
+# Or set GIT_GUARD_SCOPE="src/app:docs" (colon separated) for a single commit.
+#   - Scope set   -> any staged path outside the scope blocks the commit.
+#   - No scope    -> staged deletions are listed as a warning (block with GIT_GUARD_STRICT=1).
+# Bypass once: GIT_GUARD_SKIP=1 git commit ...
+
+[ "$GIT_GUARD_SKIP" = "1" ] && exit 0
+
+root=$(git rev-parse --show-toplevel) || exit 0
+changes=$(git -c core.quotepath=off diff --cached --name-status --no-renames)
+[ -z "$changes" ] && exit 0
+
+scope="$GIT_GUARD_SCOPE"
+if [ -z "$scope" ] && [ -f "$root/.git-guard-scope" ]; then
+  scope=$(grep -v '^[[:space:]]*#' "$root/.git-guard-scope" | grep -v '^[[:space:]]*$' | tr '\n' ':')
+fi
+
+out_of_scope=""
+deletions=""
+tab=$(printf '\t')
+while IFS="$tab" read -r status path; do
+  [ -z "$path" ] && continue
+  [ "$status" = "D" ] && deletions="$deletions
+  D  $path"
+  if [ -n "$scope" ]; then
+    inside=0
+    oldifs=$IFS; IFS=:
+    for prefix in $scope; do
+      [ -z "$prefix" ] && continue
+      case "$path" in
+        "$prefix"|"$prefix"/*) inside=1; break ;;
+      esac
+      case "$prefix" in
+        */) case "$path" in "$prefix"*) inside=1; break ;; esac ;;
+      esac
+    done
+    IFS=$oldifs
+    [ "$inside" = "0" ] && out_of_scope="$out_of_scope
+  $status  $path"
+  fi
+done <<EOF
+$changes
+EOF
+
+if [ -n "$out_of_scope" ]; then
+  echo "git-guard: BLOCKED. Staged paths outside your declared scope ($scope):" >&2
+  echo "$out_of_scope" >&2
+  echo "" >&2
+  echo "These probably belong to another session/process. Unstage them:" >&2
+  echo "  git restore --staged -- <path>" >&2
+  echo "or commit only your files:  git commit -m \"...\" -- <your paths>" >&2
+  echo "Bypass once (you are sure): GIT_GUARD_SKIP=1 git commit ..." >&2
+  exit 1
+fi
+
+if [ -z "$scope" ] && [ -n "$deletions" ]; then
+  echo "git-guard: staged deletions in this commit:$deletions" >&2
+  if [ "$GIT_GUARD_STRICT" = "1" ]; then
+    echo "git-guard: BLOCKED (GIT_GUARD_STRICT=1). If intended: GIT_GUARD_SKIP=1 git commit ..." >&2
+    exit 1
+  fi
+  echo "git-guard: if you did not delete these, another session may have. Check before pushing." >&2
+fi
+exit 0
