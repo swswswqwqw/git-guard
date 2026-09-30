@@ -33,6 +33,13 @@ export function check(command) {
       problems.push("`git checkout -- .` overwrites uncommitted work in the whole tree.");
     } else if (sub === "restore" && /(^|\s)\.(\s|$)/.test(args) && !/--staged/.test(args)) {
       problems.push("`git restore .` overwrites uncommitted work in the whole tree.");
+    } else if (
+      sub === "push" &&
+      (/(^|\s)(--force|-[a-zA-Z]*f[a-zA-Z]*)(\s|$)/.test(args) || /(^|\s)\+\S/.test(args))
+    ) {
+      problems.push(
+        "Force-push overwrites commits another session may have pushed. Use `git push --force-with-lease` if you must rewrite."
+      );
     }
   }
   return problems;

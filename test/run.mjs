@@ -13,10 +13,12 @@ const denied = [
   'git commit -m "x"', 'git add -A && git commit -m "x" -- a.txt', 'git add .', 'git commit -am "x"',
   'git commit -a -m "x"', 'git reset --hard HEAD~1', 'git clean -fd', 'git checkout -- .', 'git restore .',
   'git add -A; git commit -m y -- a',
+  'git push --force', 'git push -f origin main', 'git push origin +main', 'git push -uf origin feat',
 ];
 const allowed = [
   'git commit -m "x" -- a.txt', 'git add src/a.ts', 'git status', 'git commit -m "fix -a thing" -- a.txt',
   'git restore --staged -- a.txt', 'git log --oneline', 'git commit --only -m "x" a.txt', 'ls -a',
+  'git push', 'git push origin main', 'git push --force-with-lease origin feat', 'git push -u origin feat',
 ];
 for (const c of denied) ok("deny: " + c, check(c).length > 0);
 for (const c of allowed) ok("allow: " + c, check(c).length === 0);

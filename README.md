@@ -14,7 +14,7 @@ Anything another process staged in the meantime rides along in your commit. If i
 git-guard is two small, dependency-free hooks that make this class of mistake loud:
 
 1. **`pre-commit`** (POSIX sh) — blocks a commit whose staged paths fall outside the scope you declared, and flags staged deletions.
-2. **Claude Code `PreToolUse` hook** (Node, no packages) — denies `git commit` with no pathspec, `git add -A/.`, `git commit -a`, `git reset --hard`, `git clean -f`, `git checkout -- .` *before the agent runs them*, and tells the agent what to do instead.
+2. **Claude Code `PreToolUse` hook** (Node, no packages) — denies `git commit` with no pathspec, `git add -A/.`, `git commit -a`, `git reset --hard`, `git clean -f`, `git checkout -- .`, `git push --force`/`-f`/`+ref` (`--force-with-lease` is allowed) *before the agent runs them*, and tells the agent what to do instead.
 
 ## Install
 
