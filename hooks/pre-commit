@@ -18,8 +18,43 @@ if [ -z "$scope" ] && [ -f "$root/.git-guard-scope" ]; then
   scope=$(grep -v '^[[:space:]]*#' "$root/.git-guard-scope" | grep -v '^[[:space:]]*$' | tr '\n' ':')
 fi
 
+
+# normalize a/b/../c -> a/c ; prints nothing if it climbs above the repo root
+normalize() {
+  out=""
+  oldifs=$IFS; IFS=/
+  set -f
+  for seg in $1; do
+    case "$seg" in
+      ""|.) ;;
+      ..) case "$out" in "") IFS=$oldifs; set +f; return 1 ;; */*) out=${out%/*} ;; *) out="" ;; esac ;;
+      *) if [ -z "$out" ]; then out=$seg; else out="$out/$seg"; fi ;;
+    esac
+  done
+  set +f
+  IFS=$oldifs
+  printf '%s' "$out"
+}
+
+in_scope() {
+  oldifs=$IFS; IFS=:
+  for prefix in $scope; do
+    [ -z "$prefix" ] && continue
+    case "$1" in
+      "$prefix"|"$prefix"/*) IFS=$oldifs; return 0 ;;
+    esac
+    case "$prefix" in
+      */) case "$1" in "$prefix"*) IFS=$oldifs; return 0 ;; esac ;;
+    esac
+  done
+  IFS=$oldifs
+  return 1
+}
+
 out_of_scope=""
 deletions=""
+link_escapes=""
+submodules=""
 tab=$(printf '\t')
 while IFS="$tab" read -r status path; do
   [ -z "$path" ] && continue
@@ -54,6 +89,78 @@ if [ -n "$out_of_scope" ]; then
   echo "or commit only your files:  git commit -m \"...\" -- <your paths>" >&2
   echo "Bypass once (you are sure): GIT_GUARD_SKIP=1 git commit ..." >&2
   exit 1
+fi
+
+# Symlinks and submodules: the path can be in scope while what it points at is not.
+if [ -n "$scope" ]; then
+  raw=$(git -c core.quotepath=off diff --cached --raw --no-renames)
+  while IFS="$tab" read -r meta path; do
+    [ -z "$path" ] && continue
+    set -- $meta
+    newmode=$2; newsha=$4; status=$5
+    [ "$status" = "D" ] && continue
+    if [ "$newmode" = "120000" ]; then
+      target=$(git cat-file blob "$newsha")
+      case "$target" in
+        /*) resolved="" ;;
+        *) dir=$(dirname "$path"); [ "$dir" = "." ] && dir=""
+           resolved=$(normalize "$dir/$target") ;;
+      esac
+      if [ -z "$resolved" ] || ! in_scope "$resolved"; then
+        link_escapes="$link_escapes
+  $path -> $target"
+      fi
+    elif [ "$newmode" = "160000" ]; then
+      submodules="$submodules
+  $path"
+    fi
+  done <<EOF
+$raw
+EOF
+fi
+
+# .gitignore negation that can never work: "!dir/keep" is ignored by git when dir/ itself is excluded.
+# Checked only when a .gitignore is part of this commit; warns (blocks under GIT_GUARD_STRICT=1).
+dead_negations=""
+for gi in $(git diff --cached --name-only --diff-filter=AM | grep '\.gitignore$'); do
+  gdir=$(dirname "$gi"); [ "$gdir" = "." ] && gdir=""
+  found=$(git show ":$gi" | while IFS= read -r line; do
+    case "$line" in
+      '!'*)
+        pat=${line#!}; pat=${pat%/}; pat=${pat#/}
+        case "$pat" in *[*?[]*|"") continue ;; esac
+        full=$pat; [ -n "$gdir" ] && full="$gdir/$pat"
+        if git check-ignore -q --no-index -- "$full" 2>/dev/null; then
+          echo "  $gi: $line"
+        fi ;;
+    esac
+  done)
+  [ -n "$found" ] && dead_negations="$dead_negations
+$found"
+done
+if [ -n "$dead_negations" ]; then
+  echo "git-guard: .gitignore negation(s) with no effect (git cannot re-include a file whose parent directory is excluded):$dead_negations" >&2
+  echo "Re-include the directory first (!dir/) and exclude its contents (dir/*), then add the negation." >&2
+  if [ "$GIT_GUARD_STRICT" = "1" ]; then
+    echo "git-guard: BLOCKED (GIT_GUARD_STRICT=1). If intended: GIT_GUARD_SKIP=1 git commit ..." >&2
+    exit 1
+  fi
+fi
+
+if [ -n "$link_escapes" ]; then
+  echo "git-guard: BLOCKED. Symlinks in scope that point outside your declared scope ($scope):" >&2
+  echo "$link_escapes" >&2
+  echo "The link itself is yours, but it exposes or replaces files another session owns." >&2
+  echo "Bypass once (you are sure): GIT_GUARD_SKIP=1 git commit ..." >&2
+  exit 1
+fi
+
+if [ -n "$submodules" ]; then
+  echo "git-guard: submodule pointer changes in this commit (they record another repo's state):$submodules" >&2
+  if [ "$GIT_GUARD_STRICT" = "1" ]; then
+    echo "git-guard: BLOCKED (GIT_GUARD_STRICT=1). If intended: GIT_GUARD_SKIP=1 git commit ..." >&2
+    exit 1
+  fi
 fi
 
 if [ -z "$scope" ] && [ -n "$deletions" ]; then

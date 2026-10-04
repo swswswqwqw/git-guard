@@ -48,5 +48,49 @@ git("rm", "-q", "b/2.txt"); r = tryCommit({ GIT_GUARD_STRICT: "1" });
 ok("strict: deletion blocks", r.status === 1);
 r = tryCommit({ GIT_GUARD_STRICT: "1", GIT_GUARD_SKIP: "1" });
 ok("skip bypasses", r.status === 0);
+
+// --- symlink / submodule crossings (index entries built directly so this runs on Windows too) ---
+const addLink = (path, target) => {
+  const sha = execFileSync("git", ["hash-object", "-w", "--stdin"], { cwd: repo, input: target, encoding: "utf8" }).trim();
+  git("update-index", "--add", "--cacheinfo", "120000," + sha + "," + path);
+};
+git("reset", "-q", "--hard", "HEAD");
+addLink("a/inside", "1.txt");
+r = tryCommit({ GIT_GUARD_SCOPE: "a" });
+ok("symlink inside scope passes", r.status === 0);
+addLink("a/escape", "../b/2.txt");
+r = tryCommit({ GIT_GUARD_SCOPE: "a" });
+ok("symlink escaping scope blocks", r.status === 1 && r.stderr.includes("a/escape -> ../b/2.txt"));
+git("reset", "-q", "--hard", "HEAD");
+addLink("a/abs", "/etc/passwd");
+r = tryCommit({ GIT_GUARD_SCOPE: "a" });
+ok("absolute symlink blocks", r.status === 1);
+git("reset", "-q", "--hard", "HEAD");
+addLink("a/up", "../../outside");
+r = tryCommit({ GIT_GUARD_SCOPE: "a" });
+ok("symlink climbing above repo root blocks", r.status === 1);
+git("reset", "-q", "--hard", "HEAD");
+addLink("b/esc2", "../b/2.txt");
+r = tryCommit({ GIT_GUARD_SCOPE: "a", GIT_GUARD_SKIP: "1" });
+ok("skip bypasses symlink check", r.status === 0);
+git("update-index", "--add", "--cacheinfo", "160000,1111111111111111111111111111111111111111,a/sub");
+r = tryCommit({ GIT_GUARD_SCOPE: "a" });
+ok("submodule pointer in scope warns but passes", r.status === 0 && /submodule pointer/.test(r.stderr));
+git("update-index", "--add", "--cacheinfo", "160000,2222222222222222222222222222222222222222,a/sub");
+r = tryCommit({ GIT_GUARD_SCOPE: "a", GIT_GUARD_STRICT: "1" });
+ok("submodule pointer under STRICT blocks", r.status === 1);
+
+// --- .gitignore negation with an excluded parent ---
+const setIgnore = (body) => { writeFileSync(join(repo, ".gitignore"), body); git("add", ".gitignore"); };
+git("reset", "-q", "--hard", "HEAD");
+setIgnore("build/\n!build/keep.txt\n");
+r = tryCommit({ GIT_GUARD_SCOPE: ".gitignore" });
+ok("dead gitignore negation warns but passes", r.status === 0 && r.stderr.includes("negation") && r.stderr.includes("build/keep.txt"));
+setIgnore("build/*\n!build/keep.txt\n");
+r = tryCommit({ GIT_GUARD_SCOPE: ".gitignore" });
+ok("working gitignore negation is silent", r.status === 0 && !r.stderr.includes("negation"));
+setIgnore("build/\n!build/keep.txt\n");
+r = tryCommit({ GIT_GUARD_SCOPE: ".gitignore", GIT_GUARD_STRICT: "1" });
+ok("dead gitignore negation blocks under STRICT", r.status === 1);
 console.log(fail ? `\n${fail} FAILED` : "\nall passed");
 process.exit(fail ? 1 : 0);

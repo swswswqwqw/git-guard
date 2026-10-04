@@ -37,6 +37,9 @@ docs/billing
 Or per commit: `GIT_GUARD_SCOPE="src/billing:docs/billing" git commit ...`
 
 - Scope set → any staged path outside it **blocks** the commit and lists the offenders.
+- Scope set → a staged **symlink whose target resolves outside the scope** (relative, absolute, or climbing above the repo root) also blocks. The link path is yours; what it points at is not.
+- Scope set → staged **submodule pointer** changes are listed as a warning (they record another repo's state). `GIT_GUARD_STRICT=1` makes that a block.
+- A `.gitignore` in the commit with a negation like `!build/keep.txt` while `build/` is excluded **warns** (git silently ignores it). `GIT_GUARD_STRICT=1` makes that a block.
 - No scope → staged deletions are listed as a warning. `GIT_GUARD_STRICT=1` makes that a block.
 - Bypass once when you're sure: `GIT_GUARD_SKIP=1 git commit ...`
 
